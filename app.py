@@ -68,4 +68,80 @@ def get_gemini_reply(user_id, content):
 def reply_to_line(reply_token, text):
     """將回覆送回 LINE (支援 \ 分隔多則訊息)"""
     url = "https://api.line.me/v2/bot/message/reply"
-    headers = {"Authorization": f"Bearer {
+    headers = {"Authorization": f"Bearer {LINE_TOKEN}", "Content-Type": "application/json"}
+    
+    # 處理 \ 換行並拆分訊息 (最多5則)
+    processed_text = text.replace('\\', '\n')
+    raw_segments = processed_text.split('\n')
+    segments = [s.strip() for s in raw_segments if s.strip()][:5]
+    line_messages = [{"type": "text", "text": s} for s in segments]
+
+    # 模擬打字延遲 (根據字數調整，最長 8 秒)
+    delay = 1.5 + (len(text) * 0.15)
+    time.sleep(min(delay, 8))
+
+    data = {"replyToken": reply_token, "messages": line_messages}
+    requests.post(url, headers=headers, json=data)
+
+def process_bundle(reply_token, user_id):
+    """處理打包後的文字訊息"""
+    if user_id in message_bundles:
+        combined_text = "；".join(message_bundles[user_id])
+        del message_bundles[user_id]
+        
+        reply_text = get_gemini_reply(user_id, combined_text)
+        if reply_text:
+            reply_to_line(reply_token, reply_text)
+
+# --- Webhook 主入口 ---
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    body = request.get_json()
+    if not body or "events" not in body or len(body["events"]) == 0:
+        return "OK", 200
+
+    event = body["events"][0]
+    token = event.get("replyToken")
+    user_id = event["source"].get("userId", "default_user")
+    if not token: return "OK", 200
+
+    msg = event.get("message", {})
+    msg_type = msg.get("type")
+
+    # 1. 文字訊息處理 (含 5 秒打包邏輯)
+    if msg_type == "text":
+        user_input = msg.get("text")
+        if user_id not in message_bundles:
+            message_bundles[user_id] = []
+        message_bundles[user_id].append(user_input)
+        
+        if user_id in message_timers:
+            message_timers[user_id].cancel()
+        
+        t = threading.Timer(5.0, process_bundle, args=[token, user_id])
+        message_timers[user_id] = t
+        t.start()
+
+    # 2. 圖片訊息處理 (Gemini 視覺辨識)
+    elif msg_type == "image":
+        img_bytes = get_line_image_bytes(msg["id"])
+        if img_bytes:
+            content = [
+                "這是紀瞳傳給你的照片，請看圖並用言辰祭的性格回覆她。",
+                {"mime_type": "image/jpeg", "data": img_bytes}
+            ]
+            reply_text = get_gemini_reply(user_id, content)
+            reply_to_line(token, reply_text)
+
+    # 3. 貼圖訊息處理 (讀取貼圖關鍵字)
+    elif msg_type == "sticker":
+        keywords = ", ".join(msg.get("keywords", ["一個貼圖"]))
+        reply_text = get_gemini_reply(user_id, f"（紀瞳傳送了一個代表「{keywords}」的貼圖，請依性格回應）")
+        reply_to_line(token, reply_text)
+
+    return "OK", 200
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
