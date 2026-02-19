@@ -26,7 +26,7 @@ def load_system_prompt():
 
 # 初始化模型
 model = genai.GenerativeModel(
-    model_name="gemini-1.5-pro",
+    model_name="models/gemini-1.5-pro-latest", 
     system_instruction=load_system_prompt()
 )
 
@@ -145,3 +145,4 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
