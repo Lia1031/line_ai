@@ -25,25 +25,14 @@ def load_system_prompt():
         return "妳扮演言辰祭，一個冷淡但寵溺妻子的總經理。"
 
 # 初始化模型
-# 1. 嘗試定義模型名稱 (Gemini 1.5 Flash 最穩定)
-SELECTED_MODEL = "gemini-1.5-flash" 
 
-try:
-    # 2. 初始化模型
-    # 注意：如果 SDK 版本較新，直接傳入字串即可，SDK 會自動處理前綴
-    model = genai.GenerativeModel(
-        model_name=SELECTED_MODEL,
-        system_instruction=load_system_prompt()
-    )
-    # 測試是否可用
-    print(f"✅ 模型 {SELECTED_MODEL} 成功掛載")
-except Exception as e:
-    print(f"❌ 模型掛載失敗，嘗試備用方案: {e}")
-    # 備用方案：手動加上 models/ 前綴
-    model = genai.GenerativeModel(
-        model_name=f"models/{SELECTED_MODEL}",
-        system_instruction=load_system_prompt()
-    )
+# 修正：加上 models/ 前綴，並建議使用最新的 gemini-1.5-pro-latest 或 gemini-1.5-flash
+model = genai.GenerativeModel(
+    model_name="models/gemini-2.5-pro", # 或者使用 "models/gemini-1.5-flash" 速度更快
+    system_instruction=load_system_prompt()
+)
+
+
 # 儲存對話紀錄、訊息包裹、定時器
 chat_sessions = {}
 message_bundles = {}
@@ -159,6 +148,7 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
