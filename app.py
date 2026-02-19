@@ -2,7 +2,6 @@ import os
 import time
 import base64
 import requests
-import threading
 from flask import Flask, request, abort
 from openai import OpenAI
 
@@ -131,20 +130,6 @@ def reply_to_line(reply_token, text):
     }
     requests.post(url, headers=headers, json=data))
 
-def process_bundled_messages(reply_token, messages):
-    """合併訊息後統一呼叫 AI"""
-    # 將多則訊息串接
-    combined_input = "；".join(messages)
-    # 呼叫 AI (這會清除該使用者的包裹，由 webhook 觸發)
-    reply_text = get_asst_reply(combined_input)
-    if reply_text:
-        reply_to_line(reply_token, reply_text)
-    
-    # 清空包裹紀錄
-    bundle_key = "current_session"
-    if bundle_key in message_bundles:
-        del message_bundles[bundle_key]
-
 # --- Webhook 主入口 ---
 
 @app.route("/webhook", methods=["POST"])
@@ -194,3 +179,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
+把這串一起結合
