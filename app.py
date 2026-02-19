@@ -185,28 +185,73 @@ def reply_to_line(reply_token, text):
     requests.post(url, headers=headers, json=data)
 
 @app.route("/webhook", methods=["POST"])
+
+import base64
+
+# 下載 LINE 圖片並轉為 Base64，讓 GPT-4o 讀取
+def get_line_image_base64(message_id):
+    url = f"https://api-data.line.me/v2/bot/message/{message_id}/content"
+    headers = {"Authorization": f"Bearer {LINE_TOKEN}"}
+    r = requests.get(url, headers=headers)
+    if r.status_code == 200:
+        return base64.b64encode(r.content).decode('utf-8')
+    return None
+
+def call_ai_vision(text, base64_image=None):
+    try:
+        headers = {
+            "Authorization": f"Bearer {OPENAI_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        # 建立內容清單
+        user_content = [{"type": "text", "text": text}]
+        if base64_image:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+            })
+
+        data = {
+            "model": "gpt-4o", # 升級為 GPT-4o 才能看圖
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_content}
+            ]
+        }
+        r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data)
+        return r.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"AI 讀圖失敗: {e}")
+        return "（言辰祭低頭看著手機，似乎沒看清妳傳了什麼）"
+
+@app.route("/webhook", methods=["POST"])
 def webhook():
     body = request.get_json()
-    
-    # 處理 LINE Verify 資料
     if not body or "events" not in body or len(body["events"]) == 0:
         return "OK", 200 
 
     event = body["events"][0]
-    if "replyToken" not in event:
-        return "OK", 200
-
     token = event["replyToken"]
     msg = event.get("message", {})
+    msg_type = msg.get("type")
 
-    if msg.get("type") == "text":
-        user_text = msg.get("text")
-        reply_text = call_ai(user_text)
-    else:
-        reply_text = "言辰祭冷冷地看了你一眼，對這東西沒興趣。"
+    if msg_type == "text":
+        reply_text = call_ai_vision(msg.get("text"))
+    
+    elif msg_type == "image":
+        # 真實下載圖片並餵給 AI
+        img_base64 = get_line_image_base64(msg["id"])
+        reply_text = call_ai_vision("（紀瞳傳送了一張照片，請描述妳看到的內容並以此性格回覆）", img_base64)
 
-    # --- 關鍵修正：呼叫名稱必須與上方定義的 reply_to_line 一致 ---
-    reply_to_line(token, reply_text) 
+    elif msg_type == "sticker":
+        # 針對博美貼圖的「作弊」邏輯
+        keywords = ", ".join(msg.get("keywords", []))
+        prompt = f"（紀瞳傳送了一張博美狗的貼圖，貼圖情緒可能是：{keywords}）"
+        reply_text = call_ai_vision(prompt)
+
+    if reply_text:
+        reply_to_line(token, reply_text)
     
     return "OK", 200
 
@@ -214,6 +259,7 @@ if __name__ == "__main__":
     # Railway 通常使用 8080 端口，確保 host 是 0.0.0.0
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
