@@ -28,7 +28,7 @@ def load_system_prompt():
 
 # 修正：加上 models/ 前綴，並建議使用最新的 gemini-1.5-pro-latest 或 gemini-1.5-flash
 model = genai.GenerativeModel(
-    model_name="models/gemini-2.5-pro", # 或者使用 "models/gemini-1.5-flash" 速度更快
+    model_name="models/gemini-2.0-flash", # 或者使用 "models/gemini-1.5-flash" 速度更快
     system_instruction=load_system_prompt()
 )
 
@@ -148,6 +148,7 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
