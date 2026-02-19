@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, abort
 import requests, os
 
 app = Flask(__name__)
@@ -12,25 +12,28 @@ SYSTEM_PROMPT = """
 """
 
 def call_ai(text):
-    headers = {
-        "Authorization": f"Bearer {OPENAI_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    data = {
-        "model": "gpt-4o-mini",
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": text}
-        ]
-    }
-
-    r = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers=headers,
-        json=data
-    )
-    return r.json()["choices"][0]["message"]["content"]
+    try:
+        headers = {
+            "Authorization": f"Bearer {OPENAI_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": text}
+            ]
+        }
+        r = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=20 # 增加超時設定防止卡死
+        )
+        return r.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"AI Error: {e}")
+        return "（言辰祭挑了挑眉，似乎不想理你...）"
 
 def reply(reply_token, text):
     url = "https://api.line.me/v2/bot/message/reply"
@@ -46,17 +49,30 @@ def reply(reply_token, text):
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    event = request.json["events"][0]
-    token = event["replyToken"]
-    msg = event["message"]
+    body = request.get_json()
+    
+    # --- 關鍵修正：處理 LINE Verify 的空資料 ---
+    if not body or "events" not in body or len(body["events"]) == 0:
+        return "OK", 200 
+    # ---------------------------------------
 
-    if msg["type"] == "text":
-        reply_text = call_ai(msg["text"])
+    event = body["events"][0]
+    
+    # 判斷是否有 replyToken (有些 event 沒有)
+    if "replyToken" not in event:
+        return "OK", 200
+
+    token = event["replyToken"]
+    msg = event.get("message", {})
+
+    if msg.get("type") == "text":
+        user_text = msg.get("text")
+        reply_text = call_ai(user_text)
     else:
-        reply_text = call_ai("使用者傳了非文字訊息")
+        reply_text = "言辰祭冷冷地看了你一眼，對這東西沒興趣。"
 
     reply(token, reply_text)
-    return "OK"
+    return "OK", 200 # 確保回傳 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
