@@ -128,7 +128,7 @@ def call_ai(text):
             "Content-Type": "application/json"
         }
         data = {
-            "model": "gpt-4o-mini",
+            "model": "gpt-4o",
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": text}
@@ -202,6 +202,7 @@ if __name__ == "__main__":
     # Railway 通常使用 8080 端口，確保 host 是 0.0.0.0
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
