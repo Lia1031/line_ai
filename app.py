@@ -146,15 +146,26 @@ def call_ai(text):
         print(f"程式執行錯誤: {e}")
         return "（言辰祭挑了挑眉，似乎不想理你...）"
 
-def reply(reply_token, text):
+def reply_to_line(reply_token, text):
     url = "https://api.line.me/v2/bot/message/reply"
     headers = {
         "Authorization": f"Bearer {LINE_TOKEN}",
         "Content-Type": "application/json"
     }
+    
+    # --- 分段邏輯開始 ---
+    # 這裡將 AI 的回覆按「換行」拆分，並過濾掉空字串
+    # 限制最多傳送 5 則訊息（LINE 的上限）
+    raw_segments = text.split('\n')
+    segments = [s.strip() for s in raw_segments if s.strip()][:5]
+    
+    # 將文字包裝成 LINE 的訊息格式
+    line_messages = [{"type": "text", "text": s} for s in segments]
+    # ------------------
+
     data = {
         "replyToken": reply_token,
-        "messages": [{"type": "text", "text": text}]
+        "messages": line_messages
     }
     requests.post(url, headers=headers, json=data)
 
@@ -188,5 +199,6 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
