@@ -34,7 +34,7 @@ def get_line_image_base64(message_id):
         return base64.b64encode(r.content).decode('utf-8')
     return None
 
-def get_asst_reply(user_input, base64_image=None):
+def get_asst_reply(user_input):
     """使用 Assistants API (Threads) 獲取有記憶的回覆"""
     global user_thread_id
     try:
@@ -43,32 +43,36 @@ def get_asst_reply(user_input, base64_image=None):
             thread = client.beta.threads.create()
             user_thread_id = thread.id
 
-        # 2. 處理內容 (支援文字與圖片)
-        content = [{"type": "text", "text": user_input}]
-        if base64_image:
-            # 注意：Assistants API 處理圖片通常需要先上傳檔案
-            # 這裡我們先維持 Vision API 的邏輯來處理圖片，或簡單讓 AI 知道有圖
-            content.append({"type": "text", "text": "（妳看著這張照片，依照妳的性格給予回應）"})
-
-        # 3. 將訊息加入 Thread
+        # 2. 將訊息加入 Thread
         client.beta.threads.messages.create(
             thread_id=user_thread_id,
             role="user",
             content=user_input
         )
 
-        # 4. 執行 Run
+        # 3. 建立並開始執行 Run
         run = client.beta.threads.runs.create(
             thread_id=user_thread_id,
             assistant_id=ASST_ID
         )
 
-        # 5. 等待回覆 (Polling)
-        while run.status != "completed":
-            time.sleep(0.5)
-            run = client.beta.threads.retrieve(thread_id=user_thread_id, run_id=run.id)
+        # 4. 等待回覆 (Polling)
+        while True:
+            # --- 關鍵修正：這裡要用 .runs.retrieve ---
+            run_status = client.beta.threads.runs.retrieve(
+                thread_id=user_thread_id, 
+                run_id=run.id
+            )
+            
+            if run_status.status == "completed":
+                break
+            elif run_status.status in ["failed", "cancelled", "expired"]:
+                print(f"Run 狀態異常: {run_status.status}")
+                return "（言辰祭冷冷地看了眼手機，似乎不想理妳。）"
+            
+            time.sleep(1) # 每秒檢查一次
 
-        # 6. 取得回覆內容
+        # 5. 取得最後一則回覆
         messages = client.beta.threads.messages.list(thread_id=user_thread_id)
         return messages.data[0].content[0].text.value
     
@@ -158,3 +162,4 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
