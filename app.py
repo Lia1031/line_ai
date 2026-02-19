@@ -136,15 +136,14 @@ def call_ai(text):
         
         response_data = r.json()
         
-        # 如果發生錯誤，印出完整的回傳內容以便排錯
         if "error" in response_data:
-            print(f"OpenAI 官方錯誤訊息: {response_data['error']['message']}")
-            return f"（言辰祭冷冷地看著你，似乎在忍耐什麼：{response_data['error']['code']}）"
+            print(f"OpenAI 錯誤: {response_data['error']['message']}")
+            return "……\n沒什麼好說的。" # 這裡也使用 \ 分隔
 
         return response_data["choices"][0]["message"]["content"]
     except Exception as e:
         print(f"程式執行錯誤: {e}")
-        return "（言辰祭挑了挑眉，似乎不想理你...）"
+        return "（言辰祭冷冷地看了你一眼，轉過頭去。）"
 
 def reply_to_line(reply_token, text):
     url = "https://api.line.me/v2/bot/message/reply"
@@ -153,23 +152,22 @@ def reply_to_line(reply_token, text):
         "Content-Type": "application/json"
     }
     
-    # --- 分段邏輯開始 ---
-    # 這裡將 AI 的回覆按「換行」拆分，並過濾掉空字串
-    # 限制最多傳送 5 則訊息（LINE 的上限）
-    raw_segments = text.split('\n')
+    # --- 關鍵修正：將 AI 輸出的「\」換成換行，並切割成多則訊息 ---
+    processed_text = text.replace('\\', '\n')
+    raw_segments = processed_text.split('\n')
+    # 限制最多傳送 5 則訊息，並過濾掉空行
     segments = [s.strip() for s in raw_segments if s.strip()][:5]
     
-    # 將文字包裝成 LINE 的訊息格式
     line_messages = [{"type": "text", "text": s} for s in segments]
-    # ------------------
-
+    
     data = {
         "replyToken": reply_token,
         "messages": line_messages
     }
-    requests.post(url, headers=headers, json=data)
-
-@app.route("/webhook", methods=["POST"])
+    
+    response = requests.post(url, headers=headers, json=data)
+    if response.status_code != 200:
+        print(f"LINE 回覆失敗: {response.text}")
 def webhook():
     body = request.get_json()
     
@@ -199,6 +197,7 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
