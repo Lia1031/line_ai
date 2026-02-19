@@ -145,9 +145,17 @@ def webhook():
         reply_text = get_asst_reply(msg.get("text"))
     
     elif msg_type == "image":
-        # 讀圖模式 (目前 Vision 與 Threads 記憶整合較難，優先保證讀圖成功)
+        # 1. 先把圖片抓下來
         img_base64 = get_line_image_base64(msg["id"])
-        reply_text = call_ai_vision_only("（紀瞳傳送了一張照片，請以此性格回覆）", img_base64)
+        
+        # 2. 讓一個快速的視覺模型先「翻譯」照片內容（這段不直接回給 LINE）
+        # 我們讓它扮演言辰祭的雙眼，告訴他看到了什麼
+        vision_prompt = "請用一句話客觀描述這張照片的內容，不需要任何語氣。"
+        image_description = call_ai_vision_only(vision_prompt, img_base64)
+        
+        # 3. 把視覺描述餵給有靈魂的 Assistant，由它來做出符合性格的回覆
+        final_prompt = f"（紀瞳傳送了一張照片，內容是：{image_description}。請以此性格做出回應）"
+        reply_text = get_asst_reply(final_prompt)
 
     elif msg_type == "sticker":
         keywords = ", ".join(msg.get("keywords", []))
@@ -162,4 +170,5 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
