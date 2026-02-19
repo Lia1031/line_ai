@@ -152,33 +152,27 @@ def reply_to_line(reply_token, text):
         "Content-Type": "application/json"
     }
     
-    # --- 關鍵修正：將 AI 輸出的「\」換成換行，並切割成多則訊息 ---
+    # 將 AI 輸出的「\」換成換行，這樣才能正確分段傳送
     processed_text = text.replace('\\', '\n')
     raw_segments = processed_text.split('\n')
-    # 限制最多傳送 5 則訊息，並過濾掉空行
     segments = [s.strip() for s in raw_segments if s.strip()][:5]
     
     line_messages = [{"type": "text", "text": s} for s in segments]
-    
+
     data = {
         "replyToken": reply_token,
         "messages": line_messages
     }
-    
-    response = requests.post(url, headers=headers, json=data)
-    if response.status_code != 200:
-        print(f"LINE 回覆失敗: {response.text}")
+    requests.post(url, headers=headers, json=data)
+
+@app.route("/webhook", methods=["POST"])
 def webhook():
     body = request.get_json()
     
-    # --- 關鍵修正：處理 LINE Verify 的空資料 ---
     if not body or "events" not in body or len(body["events"]) == 0:
         return "OK", 200 
-    # ---------------------------------------
 
     event = body["events"][0]
-    
-    # 判斷是否有 replyToken (有些 event 沒有)
     if "replyToken" not in event:
         return "OK", 200
 
@@ -191,12 +185,16 @@ def webhook():
     else:
         reply_text = "言辰祭冷冷地看了你一眼，對這東西沒興趣。"
 
-    reply(token, reply_text)
-    return "OK", 200 # 確保回傳 200
+    # --- 關鍵修正：這裡的名稱要跟上面定義的一樣 ---
+    reply_to_line(token, reply_text) 
+    # ----------------------------------------
+    
+    return "OK", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
