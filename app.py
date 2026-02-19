@@ -13,7 +13,7 @@ LINE_TOKEN = os.getenv("LINE_TOKEN")
 V1API_KEY = os.getenv("V1API_KEY") 
 V1API_BASE_URL = "https://vg.v1api.cc/v1"
 # 指定模型名稱 (請根據 v1api 官網提供的型號填寫)
-TARGET_MODEL = "gemini-2.0-flash" 
+TARGET_MODEL = "gemini-2.5-pro-06-05" 
 
 # --- 初始化 OpenAI 客戶端 (對接 v1api) ---
 client = OpenAI(
@@ -144,3 +144,4 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
