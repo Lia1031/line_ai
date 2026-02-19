@@ -151,6 +151,8 @@ def call_ai(text):
         print(f"程式執行錯誤: {e}")
         return "（言辰祭挑了挑眉，似乎不想理你...）"
 
+import time # 記得在檔案最上方加入這行
+
 def reply_to_line(reply_token, text):
     url = "https://api.line.me/v2/bot/message/reply"
     headers = {
@@ -158,13 +160,23 @@ def reply_to_line(reply_token, text):
         "Content-Type": "application/json"
     }
     
-    # --- 關鍵修正：支援反斜線「\\」分段 ---
-    # 因為您的 Prompt 讓 AI 用「\\」分隔，這裡我們把「\\」換成換行符號來拆分
+    # 處理分段邏輯
     processed_text = text.replace('\\', '\n')
     raw_segments = processed_text.split('\n')
     segments = [s.strip() for s in raw_segments if s.strip()][:5]
     
+    # 這裡我們改成「一則一則傳」，這樣才能製造時間差
+    # 注意：LINE 的 replyToken 只能用一次，所以如果真的要分開傳，
+    # 實務上我們會用「Push Message」，但那會消耗訊息額度。
+    # 
+    # 最折衷且不花錢的做法：在打包成一個 messages 清單前，
+    # 雖然 LINE 會同時顯示，但我們可以在系統處理端稍微延遲。
+    
     line_messages = [{"type": "text", "text": s} for s in segments]
+
+    # 在正式發送給 LINE 伺服器前，讓程式「停頓」一下
+    # 模擬言辰祭在思考與打字的 1.5 秒
+    time.sleep(1.5) 
 
     data = {
         "replyToken": reply_token,
@@ -202,6 +214,7 @@ if __name__ == "__main__":
     # Railway 通常使用 8080 端口，確保 host 是 0.0.0.0
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
