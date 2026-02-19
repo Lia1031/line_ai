@@ -20,6 +20,9 @@ message_bundles = {}
 message_timers = {}
 user_thread_id = None
 
+# --- 角色設定 (保險起見，在這裡也放一份簡單的) ---
+SYSTEM_PROMPT = "你扮演言辰祭，一個冷淡但寵溺妻子的總經理。說話簡潔、不用驚嘆號、使用 \\ 分隔句子。"
+
 # --- 功能函式 ---
 
 def get_line_image_base64(message_id):
@@ -77,12 +80,15 @@ def call_ai_vision_only(text, base64_image):
         ]
         data = {
             "model": "gpt-4o",
-            "messages": [{"role": "user", "content": user_content}]
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_content}
+            ]
         }
-        r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data)
+        r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=25)
         return r.json()["choices"][0]["message"]["content"]
     except:
-        return "（一張看不清內容的照片。）"
+        return "一張普通的照片。"
 
 def reply_to_line(reply_token, text):
     url = "https://api.line.me/v2/bot/message/reply"
@@ -93,7 +99,7 @@ def reply_to_line(reply_token, text):
     segments = [s.strip() for s in raw_segments if s.strip()][:5]
     line_messages = [{"type": "text", "text": s} for s in segments]
 
-    # 模擬打字延遲
+    # 動態模擬打字延遲
     typing_delay = 1.5 + (len(text) * 0.2)
     if typing_delay > 8: typing_delay = 8
     time.sleep(typing_delay)
@@ -101,13 +107,9 @@ def reply_to_line(reply_token, text):
     data = {"replyToken": reply_token, "messages": line_messages}
     requests.post(url, headers=headers, json=data)
 
-# --- 處理包裹訊息的邏輯 ---
-
 def process_bundle(reply_token, bundle_key):
-    """倒數結束後合併訊息並送給 AI"""
     if bundle_key in message_bundles:
         combined_text = "；".join(message_bundles[bundle_key])
-        # 清空包裹避免重複
         del message_bundles[bundle_key]
         
         reply_text = get_asst_reply(combined_text)
@@ -128,12 +130,34 @@ def webhook():
 
     msg = event.get("message", {})
     msg_type = msg.get("type")
-    
-    # 這裡我們用一個固定 key 處理妳的訊息
     bundle_key = "user_1"
 
     if msg_type == "text":
         user_input = msg.get("text")
+        if bundle_key not in message_bundles:
+            message_bundles[bundle_key] = []
+        message_bundles[bundle_key].append(user_input)
         
-        # 加入包裹
-        if bundle_key not in message_bundles
+        if bundle_key in message_timers:
+            message_timers[bundle_key].cancel()
+            
+        t = threading.Timer(5.0, process_bundle, args=[token, bundle_key])
+        message_timers[bundle_key] = t
+        t.start()
+
+    elif msg_type == "image":
+        img_base64 = get_line_image_base64(msg["id"])
+        image_desc = call_ai_vision_only("請用一句話客觀描述這張照片內容。", img_base64)
+        reply_text = get_asst_reply(f"（紀瞳傳送照片：{image_desc}。請以此性格回應）")
+        reply_to_line(token, reply_text)
+
+    elif msg_type == "sticker":
+        keywords = ", ".join(msg.get("keywords", []))
+        reply_text = get_asst_reply(f"（紀瞳傳送貼圖：{keywords}。妳的回應是？）")
+        reply_to_line(token, reply_text)
+
+    return "OK", 200
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
