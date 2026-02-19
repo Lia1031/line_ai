@@ -13,8 +13,7 @@ app = Flask(__name__)
 LINE_TOKEN = os.getenv("LINE_TOKEN")
 V1API_KEY = os.getenv("V1API_KEY") 
 V1API_BASE_URL = "https://vg.v1api.cc/v1"
-TARGET_MODEL = "gemini-2.0-flash" # 使用你清單中有的模型
-
+TARGET_MODEL = "gemini-2.5-pro-06-05" # 使用你清單中有的模
 client = OpenAI(api_key=V1API_KEY, base_url=V1API_BASE_URL)
 
 # --- 記憶與人設管理 ---
@@ -158,3 +157,4 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
