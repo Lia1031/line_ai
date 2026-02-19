@@ -225,7 +225,7 @@ def webhook():
     elif msg_type == "sticker":
         keywords = ", ".join(msg.get("keywords", []))
         # 針對博美貼圖的偵測（博美通常會帶有 dog 或 pomeranian 關鍵字）
-        prompt = f"（紀瞳傳送了一張博美狗貼圖，情緒可能是：{keywords}。請用妳的風格回應這份可愛）"
+        prompt = f"（紀瞳傳送了一張貼圖，情緒可能是：{keywords}。請用妳的風格回應）"
         reply_text = call_ai_vision(prompt)
 
     if reply_text:
@@ -236,6 +236,7 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
