@@ -28,11 +28,19 @@ def call_ai(text):
             "https://api.openai.com/v1/chat/completions",
             headers=headers,
             json=data,
-            timeout=20 # 增加超時設定防止卡死
+            timeout=20
         )
-        return r.json()["choices"][0]["message"]["content"]
+        
+        response_data = r.json()
+        
+        # 如果發生錯誤，印出完整的回傳內容以便排錯
+        if "error" in response_data:
+            print(f"OpenAI 官方錯誤訊息: {response_data['error']['message']}")
+            return f"（言辰祭冷冷地看著你，似乎在忍耐什麼：{response_data['error']['code']}）"
+
+        return response_data["choices"][0]["message"]["content"]
     except Exception as e:
-        print(f"AI Error: {e}")
+        print(f"程式執行錯誤: {e}")
         return "（言辰祭挑了挑眉，似乎不想理你...）"
 
 def reply(reply_token, text):
@@ -77,3 +85,4 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
