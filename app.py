@@ -1,12 +1,16 @@
+import os
+import time
+import base64
+import requests
 from flask import Flask, request, abort
-import requests, os
 
 app = Flask(__name__)
 
+# --- 環境變數設定 ---
 LINE_TOKEN = os.getenv("LINE_TOKEN")
 OPENAI_KEY = os.getenv("OPENAI_KEY")
 
-# 這裡保留您原本那段超級詳細的 SYSTEM_PROMPT
+# --- 言辰祭角色設定 (簡略版，請在妳的代碼中保留完整版) ---
 SYSTEM_PROMPT = """
 # 任务
 你需要扮演指定角色，根据角色的经历，模仿语气进行线上的日常对话。全部都使用繁體中文回覆，每次回覆1～2則訊息不等,禁止使用英文回覆，全部使用繁體中文，禁止產生日常對話以外的內容
@@ -121,75 +125,10 @@ SYSTEM_PROMPT = """
 
 """
 
-def call_ai(text):
-    try:
-        headers = {
-            "Authorization": f"Bearer {OPENAI_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": "gpt-4o",
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": text}
-            ]
-        }
-        r = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers,
-            json=data,
-            timeout=20
-        )
-        
-        response_data = r.json()
-        if "error" in response_data:
-            print(f"OpenAI 官方錯誤訊息: {response_data['error']['message']}")
-            return f"（言辰祭冷冷地看著你，似乎在忍耐什麼：{response_data['error']['code']}）"
+# --- 功能函式 ---
 
-        return response_data["choices"][0]["message"]["content"]
-    except Exception as e:
-        print(f"程式執行錯誤: {e}")
-        return "（言辰祭挑了挑眉，似乎不想理你...）"
-
-import time # 記得在檔案最上方加入這行
-
-def reply_to_line(reply_token, text):
-    url = "https://api.line.me/v2/bot/message/reply"
-    headers = {
-        "Authorization": f"Bearer {LINE_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    
-    # 處理分段邏輯
-    processed_text = text.replace('\\', '\n')
-    raw_segments = processed_text.split('\n')
-    segments = [s.strip() for s in raw_segments if s.strip()][:5]
-    
-    # 這裡我們改成「一則一則傳」，這樣才能製造時間差
-    # 注意：LINE 的 replyToken 只能用一次，所以如果真的要分開傳，
-    # 實務上我們會用「Push Message」，但那會消耗訊息額度。
-    # 
-    # 最折衷且不花錢的做法：在打包成一個 messages 清單前，
-    # 雖然 LINE 會同時顯示，但我們可以在系統處理端稍微延遲。
-    
-    line_messages = [{"type": "text", "text": s} for s in segments]
-
-    # 在正式發送給 LINE 伺服器前，讓程式「停頓」一下
-    # 模擬言辰祭在思考與打字的 1.5 秒
-    time.sleep(1.5) 
-
-    data = {
-        "replyToken": reply_token,
-        "messages": line_messages
-    }
-    requests.post(url, headers=headers, json=data)
-
-@app.route("/webhook", methods=["POST"])
-
-import base64
-
-# 下載 LINE 圖片並轉為 Base64，讓 GPT-4o 讀取
 def get_line_image_base64(message_id):
+    """下載 LINE 圖片並轉為 Base64"""
     url = f"https://api-data.line.me/v2/bot/message/{message_id}/content"
     headers = {"Authorization": f"Bearer {LINE_TOKEN}"}
     r = requests.get(url, headers=headers)
@@ -198,13 +137,13 @@ def get_line_image_base64(message_id):
     return None
 
 def call_ai_vision(text, base64_image=None):
+    """呼叫 GPT-4o 進行文字或視覺分析"""
     try:
         headers = {
             "Authorization": f"Bearer {OPENAI_KEY}",
             "Content-Type": "application/json"
         }
         
-        # 建立內容清單
         user_content = [{"type": "text", "text": text}]
         if base64_image:
             user_content.append({
@@ -213,41 +152,80 @@ def call_ai_vision(text, base64_image=None):
             })
 
         data = {
-            "model": "gpt-4o", # 升級為 GPT-4o 才能看圖
+            "model": "gpt-4o",
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_content}
             ]
         }
-        r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data)
-        return r.json()["choices"][0]["message"]["content"]
+        r = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=25
+        )
+        response_data = r.json()
+        
+        if "error" in response_data:
+            print(f"OpenAI 錯誤: {response_data['error']['message']}")
+            return "（言辰祭冷冷地看了眼螢幕）\\妳到底傳了什麼。"
+
+        return response_data["choices"][0]["message"]["content"]
     except Exception as e:
-        print(f"AI 讀圖失敗: {e}")
-        return "（言辰祭低頭看著手機，似乎沒看清妳傳了什麼）"
+        print(f"AI 執行錯誤: {e}")
+        return "（言辰祭挑了挑眉，轉身忙工作去了。）"
+
+def reply_to_line(reply_token, text):
+    """發送訊息回 LINE 並加入模擬打字延遲"""
+    url = "https://api.line.me/v2/bot/message/reply"
+    headers = {
+        "Authorization": f"Bearer {LINE_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    processed_text = text.replace('\\', '\n')
+    raw_segments = processed_text.split('\n')
+    segments = [s.strip() for s in raw_segments if s.strip()][:5]
+    line_messages = [{"type": "text", "text": s} for s in segments]
+
+    # 模擬言辰祭打字的沉穩感，停頓 1.5 秒
+    time.sleep(1.5)
+
+    data = {
+        "replyToken": reply_token,
+        "messages": line_messages
+    }
+    requests.post(url, headers=headers, json=data)
+
+# --- Webhook 主入口 ---
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     body = request.get_json()
     if not body or "events" not in body or len(body["events"]) == 0:
-        return "OK", 200 
+        return "OK", 200
 
     event = body["events"][0]
-    token = event["replyToken"]
+    token = event.get("replyToken")
+    if not token:
+        return "OK", 200
+
     msg = event.get("message", {})
     msg_type = msg.get("type")
+    
+    reply_text = ""
 
     if msg_type == "text":
         reply_text = call_ai_vision(msg.get("text"))
     
     elif msg_type == "image":
-        # 真實下載圖片並餵給 AI
         img_base64 = get_line_image_base64(msg["id"])
-        reply_text = call_ai_vision("（紀瞳傳送了一張照片，請描述妳看到的內容並以此性格回覆）", img_base64)
+        reply_text = call_ai_vision("（紀瞳傳送了一張照片，請根據照片內容與妳的角色性格做出回應）", img_base64)
 
     elif msg_type == "sticker":
-        # 針對博美貼圖的「作弊」邏輯
         keywords = ", ".join(msg.get("keywords", []))
-        prompt = f"（紀瞳傳送了一張博美狗的貼圖，貼圖情緒可能是：{keywords}）"
+        # 針對博美貼圖的偵測（博美通常會帶有 dog 或 pomeranian 關鍵字）
+        prompt = f"（紀瞳傳送了一張博美狗貼圖，情緒可能是：{keywords}。請用妳的風格回應這份可愛）"
         reply_text = call_ai_vision(prompt)
 
     if reply_text:
@@ -256,11 +234,8 @@ def webhook():
     return "OK", 200
 
 if __name__ == "__main__":
-    # Railway 通常使用 8080 端口，確保 host 是 0.0.0.0
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
-
-
 
 
 
