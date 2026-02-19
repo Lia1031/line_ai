@@ -106,14 +106,18 @@ def reply_to_line(reply_token, text):
 
 def process_bundle(reply_token, user_id):
     if user_id in message_bundles:
-        text = "；".join(message_bundles[user_id])
+        # 將妳 10 秒內傳的所有訊息用「；」串起來
+        combined_text = "；".join(message_bundles[user_id])
         del message_bundles[user_id]
-        reply_to_line(reply_token, get_ai_reply(user_id, text))
+        
+        # 呼叫 AI (Gemini 文字對話)
+        reply_text = get_ai_reply(user_id, combined_text)
+        reply_to_line(reply_token, reply_text)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     body = request.get_json()
-    if not body or "events" not in body or not body["events"]: return "OK", 200
+    if not body or "events" not in body: return "OK", 200
     event = body["events"][0]
     token = event.get("replyToken")
     user_id = event["source"].get("userId", "default_user")
@@ -124,13 +128,19 @@ def webhook():
 
     if msg_type == "text":
         user_input = msg.get("text")
-        if user_id not in message_bundles: message_bundles[user_id] = []
+        if user_id not in message_bundles:
+            message_bundles[user_id] = []
         message_bundles[user_id].append(user_input)
-        if user_id in message_timers: message_timers[user_id].cancel()
-        t = threading.Timer(5.0, process_bundle, args=[token, user_id])
+        
+        # 每傳一則新訊息，就取消舊計時器，重新數 10 秒
+        if user_id in message_timers:
+            message_timers[user_id].cancel()
+        
+        # 設定 10 秒等待
+        t = threading.Timer(10.0, process_bundle, args=[token, user_id])
         message_timers[user_id] = t
         t.start()
-
+        
     elif msg_type == "image":
         # 下載照片交給 GPT-4o-mini 辨識
         url = f"https://api-data.line.me/v2/bot/message/{msg['id']}/content"
@@ -153,3 +163,4 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
