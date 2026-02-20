@@ -3,3 +3,5 @@ openai
 requests
 pytz
 gunicorn
+gspread
+oauth2client
