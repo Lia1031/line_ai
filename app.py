@@ -18,29 +18,26 @@ LINE_TOKEN = os.getenv("LINE_TOKEN")
 V1API_KEY = os.getenv("V1API_KEY") 
 V1API_BASE_URL = "https://vg.v1api.cc/v1"
 
-# --- 模型設定 ---
+# --- 模型設定：使用妳目前最穩定的模型 ---
 TEXT_MODEL = "gemini-2.5-pro-06-05" 
 
 client = OpenAI(api_key=V1API_KEY, base_url=V1API_BASE_URL)
 
-# --- 1. 資源管理 ---
+# --- 1. 資源與記憶管理 ---
 
 def load_system_prompt():
     try:
         with open("character_prompt.txt", "r", encoding="utf-8") as f:
             return f.read().strip()
     except:
-        return "妳扮演言辰祭，說話簡潔、使用 \\ 分隔。"
+        return "妳扮演言辰祭，一個冷淡但寵溺妻子的總經理。說話簡潔、使用 \\ 分隔。"
 
 def load_emojis():
-    """強化讀取邏輯"""
     if os.path.exists('emojis.json'):
         try:
             with open('emojis.json', 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except Exception as e:
-            print(f"Read emojis.json error: {e}")
-            return {}
+        except: return {}
     return {}
 
 def load_chat_context():
@@ -60,7 +57,7 @@ def save_chat_context(context):
 message_bundles = {}
 message_timers = {}
 
-# --- 2. 核心邏輯 ---
+# --- 2. 核心邏輯 (含記憶清理與情緒感知) ---
 
 def get_ai_reply(user_id, content):
     all_contexts = load_chat_context()
@@ -70,9 +67,11 @@ def get_ai_reply(user_id, content):
     if user_id not in all_contexts:
         all_contexts[user_id] = [{"role": "system", "content": load_system_prompt()}]
     
+    # 每次對話都載入最新人設
     all_contexts[user_id][0] = {"role": "system", "content": load_system_prompt()}
     all_contexts[user_id].append({"role": "user", "content": f"（{time_str}）\n{content}"})
     
+    # 限制記憶：保留最近 6 則訊息，有效控制 Token
     history = [all_contexts[user_id][0]] + all_contexts[user_id][-6:]
 
     try:
@@ -80,21 +79,22 @@ def get_ai_reply(user_id, content):
             model=TEXT_MODEL,
             messages=history,
             temperature=0.7,
-            max_tokens=200
+            max_tokens=250
         )
         full_reply = response.choices[0].message.content
         
-        # 存入記憶前刪除標籤
-        clean_reply = re.sub(r'\[表情_[^\]]+\]', '', full_reply).strip()
-        all_contexts[user_id].append({"role": "assistant", "content": clean_reply})
+        # --- 重要：在存入記憶前，刪除回覆中的表情標籤 ---
+        # 這樣下一次對話時，AI 不會被舊的標籤干擾，也能節省 Token
+        clean_reply_for_memory = re.sub(r'\[表情_[^\]]+\]', '', full_reply).strip()
+        all_contexts[user_id].append({"role": "assistant", "content": clean_reply_for_memory})
         save_chat_context(all_contexts)
         
         return full_reply
     except Exception as e:
-        print(f"AI API Error: {e}") # 會在 Logs 顯示具體錯誤
-        return f"（言辰祭忙碌中：{str(e)[:20]}）"
+        print(f"AI API Error: {e}")
+        return "（言辰祭忙碌中...）"
 
-# --- 3. LINE 回覆功能 (100% 成功發送表情測試) ---
+# --- 3. LINE 回覆功能 (0.1 機率與自動解析) ---
 
 def reply_to_line(reply_token, text):
     url = "https://api.line.me/v2/bot/message/reply"
@@ -103,15 +103,16 @@ def reply_to_line(reply_token, text):
     emoji_config = load_emojis()
     found_emoji = None
     
-    # 測試版：不管 AI 寫什麼，都從清單抽一個表情
-    if emoji_config:
-        keys = list(emoji_config.keys())
-        chosen_key = random.choice(keys)
-        found_emoji = emoji_config[chosen_key]
-        print(f"Testing Emoji: {chosen_key} -> {found_emoji}")
+    # 解析 AI 回覆中是否包含 emojis.json 裡的標籤
+    clean_text = text
+    for tag, config in emoji_config.items():
+        if tag in text:
+            found_emoji = config
+            break
+    
+    # 強制使用正則表達式清除所有 [表情_xxx] 文字，保證不出現在對話框
+    clean_text = re.sub(r'\[表情_[^\]]+\]', '', clean_text).strip()
 
-    # 強制清除文字中所有 [表情_xxx]
-    clean_text = re.sub(r'\[表情_[^\]]+\]', '', text).strip()
     processed_text = clean_text.replace('\\', '\n')
     segments = [s.strip() for s in processed_text.split('\n') if s.strip()][:4]
     
@@ -120,8 +121,9 @@ def reply_to_line(reply_token, text):
     else:
         line_messages = [{"type": "text", "text": s} for s in segments]
 
-    # --- 100% 發送表情貼 ---
-    if found_emoji:
+    # --- 0.1 機率控制邏輯 ---
+    # 只有當 AI 決定要發表情貼 (found_emoji 不為空) 且 擲骰子成功 (10% 機率)
+    if found_emoji and (random.random() < 0.1):
         line_messages.append({
             "type": "text",
             "text": "$",
@@ -132,11 +134,14 @@ def reply_to_line(reply_token, text):
             }]
         })
 
+    # 模擬打字感，延遲回覆
+    delay = min(1.5 + (len(clean_text) * 0.1), 7)
+    time.sleep(delay)
+    
     payload = {"replyToken": reply_token, "messages": line_messages}
-    res = requests.post(url, headers=headers, json=payload)
-    print(f"LINE Post Status: {res.status_code}")
+    requests.post(url, headers=headers, json=payload)
 
-# --- 4. Webhook 處理 ---
+# --- 4. Webhook 處理 (10秒打包) ---
 
 def process_bundle(reply_token, user_id):
     if user_id in message_bundles:
@@ -158,11 +163,10 @@ def webhook():
         if user_id not in message_bundles: message_bundles[user_id] = []
         message_bundles[user_id].append(user_input)
         if user_id in message_timers: message_timers[user_id].cancel()
-        t = threading.Timer(5.0, process_bundle, args=[token, user_id]) # 縮短到 5 秒測試
+        t = threading.Timer(10.0, process_bundle, args=[token, user_id])
         message_timers[user_id] = t
         t.start()
     return "OK", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
