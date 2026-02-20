@@ -18,7 +18,7 @@ LINE_TOKEN = os.getenv("LINE_TOKEN")
 V1API_KEY = os.getenv("V1API_KEY") 
 V1API_BASE_URL = "https://vg.v1api.cc/v1"
 
-# --- 模型設定：使用妳目前最穩定的模型 ---
+# --- 模型設定 ---
 TEXT_MODEL = "gemini-2.0-flash-exp" 
 
 client = OpenAI(api_key=V1API_KEY, base_url=V1API_BASE_URL)
@@ -30,7 +30,7 @@ def load_system_prompt():
         with open("character_prompt.txt", "r", encoding="utf-8") as f:
             return f.read().strip()
     except:
-        return "妳扮演言辰祭，一個冷淡但寵溺妻子的總經理。說話簡潔、使用 \\ 分隔。"
+        return "妳扮演言辰祭。說話簡潔、使用 \\ 分隔。"
 
 def load_emojis():
     if os.path.exists('emojis.json'):
@@ -57,21 +57,23 @@ def save_chat_context(context):
 message_bundles = {}
 message_timers = {}
 
-# --- 2. 核心邏輯 (含記憶清理與情緒感知) ---
+# --- 2. 核心邏輯 (強化清理功能) ---
 
 def get_ai_reply(user_id, content):
     all_contexts = load_chat_context()
     tw_tz = pytz.timezone('Asia/Taipei')
-    time_str = datetime.now(tw_tz).strftime("%Y-%m-%d %H:%M:%S")
+    # 瘦身：時間格式縮短，減少 Token 消耗
+    time_str = datetime.now(tw_tz).strftime("%m/%d %H:%M")
     
     if user_id not in all_contexts:
         all_contexts[user_id] = [{"role": "system", "content": load_system_prompt()}]
     
-    # 每次對話都載入最新人設
     all_contexts[user_id][0] = {"role": "system", "content": load_system_prompt()}
-    all_contexts[user_id].append({"role": "user", "content": f"（{time_str}）\n{content}"})
     
-    # 限制記憶：保留最近 6 則訊息，有效控制 Token
+    # 傳給 AI 的內容，明確標示這是系統注入的時間資訊
+    all_contexts[user_id].append({"role": "user", "content": f"[Time: {time_str}]\n{content}"})
+    
+    # 限制記憶：保留 System + 最近 6 則
     history = [all_contexts[user_id][0]] + all_contexts[user_id][-6:]
 
     try:
@@ -79,41 +81,47 @@ def get_ai_reply(user_id, content):
             model=TEXT_MODEL,
             messages=history,
             temperature=0.7,
-            max_tokens=250
+            max_tokens=200
         )
         full_reply = response.choices[0].message.content
         
-        # --- 重要：在存入記憶前，刪除回覆中的表情標籤 ---
-        # 這樣下一次對話時，AI 不會被舊的標籤干擾，也能節省 Token
-        clean_reply_for_memory = re.sub(r'\[表情_[^\]]+\]', '', full_reply).strip()
-        all_contexts[user_id].append({"role": "assistant", "content": clean_reply_for_memory})
+        # --- 核心清理：刪除 AI 可能誤學的時間戳記與標籤 ---
+        # 1. 刪除表情標籤 [表情_xxx]
+        # 2. 刪除可能出現的時間格式如 (2026-02-20 ...) 或 [Time: ...] 或 02/20 14:00
+        clean_reply = re.sub(r'\[表情_[^\]]+\]', '', full_reply)
+        clean_reply = re.sub(r'[\(\[][0-9\/\-\s:]+[\)\]]', '', clean_reply) # 刪除括號內的時間
+        clean_reply = clean_reply.strip()
+
+        # 存入記憶的是最乾淨的文字，能大幅省下下次對話的 Token
+        all_contexts[user_id].append({"role": "assistant", "content": clean_reply})
         save_chat_context(all_contexts)
         
-        return full_reply
+        return full_reply # 這裡回傳 full_reply 是為了讓 reply_to_line 解析標籤
     except Exception as e:
         print(f"AI API Error: {e}")
-        return "（言辰祭忙碌中...）"
+        return "（忙碌中...）"
 
-# --- 3. LINE 回覆功能 (0.1 機率與自動解析) ---
+# --- 3. LINE 回覆功能 ---
 
-def reply_to_line(reply_token, text):
+def reply_to_line(reply_token, text, raw_input=""):
     url = "https://api.line.me/v2/bot/message/reply"
     headers = {"Authorization": f"Bearer {LINE_TOKEN}", "Content-Type": "application/json"}
     
     emoji_config = load_emojis()
     found_emoji = None
     
-    # 解析 AI 回覆中是否包含 emojis.json 裡的標籤
-    clean_text = text
+    # 優先解析標籤
     for tag, config in emoji_config.items():
         if tag in text:
             found_emoji = config
             break
     
-    # 強制使用正則表達式清除所有 [表情_xxx] 文字，保證不出現在對話框
-    clean_text = re.sub(r'\[表情_[^\]]+\]', '', clean_text).strip()
+    # 徹底清理要顯示給妳看的文字（不顯示標籤、不顯示殘留時間）
+    display_text = re.sub(r'\[表情_[^\]]+\]', '', text)
+    display_text = re.sub(r'[\(\[][0-9\/\-\s:]+[\)\]]', '', display_text)
+    display_text = display_text.strip()
 
-    processed_text = clean_text.replace('\\', '\n')
+    processed_text = display_text.replace('\\', '\n')
     segments = [s.strip() for s in processed_text.split('\n') if s.strip()][:4]
     
     if not segments:
@@ -121,34 +129,29 @@ def reply_to_line(reply_token, text):
     else:
         line_messages = [{"type": "text", "text": s} for s in segments]
 
-    # --- 0.1 機率控制邏輯 ---
-    # 只有當 AI 決定要發表情貼 (found_emoji 不為空) 且 擲骰子成功 (10% 機率)
-    if found_emoji and (random.random() < 0.7) :
+    # 機率控制：如果妳訊息有「表情貼」則必中，否則 70% 
+    user_asked = "表情貼" in raw_input
+    if found_emoji and (random.random() < 0.7 or user_asked):
         line_messages.append({
             "type": "text",
             "text": "$",
-            "emojis": [{
-                "index": 0, 
-                "productId": found_emoji["productId"], 
-                "emojiId": found_emoji["emojiId"]
-            }]
+            "emojis": [{"index": 0, "productId": found_emoji["productId"], "emojiId": found_emoji["emojiId"]}]
         })
 
-    # 模擬打字感，延遲回覆
-    delay = min(1.5 + (len(clean_text) * 0.1), 7)
+    delay = min(1.0 + (len(display_text) * 0.1), 5)
     time.sleep(delay)
     
     payload = {"replyToken": reply_token, "messages": line_messages}
     requests.post(url, headers=headers, json=payload)
 
-# --- 4. Webhook 處理 (10秒打包) ---
+# --- 4. Webhook 處理 ---
 
 def process_bundle(reply_token, user_id):
     if user_id in message_bundles:
         combined_text = "；".join(message_bundles[user_id])
         del message_bundles[user_id]
         reply_text = get_ai_reply(user_id, combined_text)
-        reply_to_line(reply_token, reply_text)
+        reply_to_line(reply_token, reply_text, raw_input=combined_text)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -170,7 +173,3 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
-
-
-
