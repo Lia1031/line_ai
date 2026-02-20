@@ -1,5 +1,4 @@
 flask
-requests
 openai
-gunicorn
-google-generativeai
+requests
+pytz
