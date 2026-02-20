@@ -102,26 +102,36 @@ def reply_to_line(reply_token, text):
     found_emoji = None
     clean_text = text
 
-    # 1. 解析 AI 回覆中是否有表情代碼
+    # 1. 強化解析：先檢查有沒有代碼，不管在哪個位置
     for tag, config in emoji_config.items():
         if tag in text:
             found_emoji = config
-            clean_text = text.replace(tag, "").strip()
-            break
+            # 徹底移除所有發現的代碼標籤，避免出現在 LINE 上
+            clean_text = clean_text.replace(tag, "").strip()
+    
+    # 如果 AI 的代碼寫法不標準，我們再用正則表達式做最後掃描（確保 [表情_xxx] 消失）
+    import re
+    clean_text = re.sub(r'\[表情_[^\]]+\]', '', clean_text).strip()
 
-    # 2. 處理文字換行與分段
+    # 2. 處理文字換行
     processed_text = clean_text.replace('\\', '\n')
     segments = [s.strip() for s in processed_text.split('\n') if s.strip()][:4]
-    line_messages = [{"type": "text", "text": s} for s in segments]
+    
+    # 如果文字被刪光了（只有代碼），至少留個空格避免報錯
+    if not segments:
+        line_messages = [{"type": "text", "text": " "}]
+    else:
+        line_messages = [{"type": "text", "text": s} for s in segments]
 
-    # 3. --- 表情貼發送機率控制 ---
-    # 只有當 AI 有寫代碼，且隨機數小於 0.1 時，才會發送表情貼
-    if found_emoji and (random.random() < 0.1):
+    # 3. --- 0.1 機率控制 ---
+    # 只有 AI 有寫代碼，且抽中 10% 機率時，才發送表情貼
+    if found_emoji and (random.random() < 1.0):
         line_messages.append({
             "type": "text",
             "text": "$",
             "emojis": [{"index": 0, "productId": found_emoji["productId"], "emojiId": found_emoji["emojiId"]}]
         })
+    # 如果妳想測試功能是否正常，可以先暫時把 < 0.1 改成 < 1.0，成功後再改回 0.1
 
     delay = min(1.5 + (len(clean_text) * 0.1), 7)
     time.sleep(delay)
@@ -172,3 +182,4 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
