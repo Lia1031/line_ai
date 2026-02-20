@@ -123,7 +123,7 @@ def reply_to_line(reply_token, text):
 
     # --- 0.1 機率控制邏輯 ---
     # 只有當 AI 決定要發表情貼 (found_emoji 不為空) 且 擲骰子成功 (10% 機率)
-    if found_emoji :
+    if found_emoji and (random.random() < 0.3) :
         line_messages.append({
             "type": "text",
             "text": "$",
@@ -170,4 +170,5 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
 
