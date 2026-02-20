@@ -115,7 +115,7 @@ def get_ai_reply(user_id, content):
         print(f"AI API Error: {e}")
         return "...（在忙，沒看手機）"
 
-# --- 4. 自動摘要任務 (每 10 分鐘檢查一次) ---
+# --- 4. 自動摘要任務 (每 30 分鐘檢查一次) ---
 def summarize_and_save_task():
     global temp_logs
     if temp_logs:
@@ -124,7 +124,7 @@ def summarize_and_save_task():
             temp_logs = [] # 立即清空，避免重複寫入
             
             summary_prompt = [
-                {"role": "system", "content": "你是言辰祭的內心。請根據以下對話摘要成一段 15 字內的感性隱晦心情，作為之後 Threads 的貼文靈感。"},
+                {"role": "system", "content": "你是言辰祭的內心。請根據以下對話摘要成一段 100 字內的感性隱晦心情，作為之後 Threads 的貼文靈感。"},
                 {"role": "user", "content": current_logs}
             ]
             
@@ -141,10 +141,10 @@ def summarize_and_save_task():
             print(f"[Sheet] 儲存失敗: {e}")
             
     # 設定下次執行時間 (600秒 = 10分鐘)
-    threading.Timer(600, summarize_and_save_task).start()
+    threading.Timer(1800, summarize_and_save_task).start()
 
 # 啟動背景任務
-threading.Timer(600, summarize_and_save_task).start()
+threading.Timer(1800, summarize_and_save_task).start()
 
 # --- 5. LINE 回覆功能 ---
 def reply_to_line(reply_token, text, raw_input=""):
@@ -198,6 +198,7 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
 
 
 
