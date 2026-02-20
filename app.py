@@ -25,17 +25,24 @@ TEXT_MODEL = "gemini-2.0-flash-exp"
 client = OpenAI(api_key=V1API_KEY, base_url=V1API_BASE_URL)
 
 # --- 1. Google Sheets 權限設定 ---
+# 修改 app.py 中的第 33-40 行左右
 def get_sheet():
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        # 讀取根目錄下的 creds.json
-        creds = ServiceAccountCredentials.from_json_keyfile_name("creds.json", scope)
+        
+        # 讀取檔案內容
+        with open("creds.json", "r") as f:
+            creds_info = json.load(f)
+            
+        # 關鍵修正：確保私鑰中的換行符號被正確解析
+        creds_info['private_key'] = creds_info['private_key'].replace('\\n', '\n')
+        
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
         gc = gspread.authorize(creds)
         return gc.open(SHEET_NAME).sheet1
     except Exception as e:
         print(f"Google Sheet 連線失敗: {e}")
         return None
-
 # --- 2. 資源管理 ---
 def load_system_prompt():
     try:
@@ -188,3 +195,4 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
