@@ -124,4 +124,47 @@ def reply_to_line(reply_token, text, raw_input=""):
         line_messages.append({
             "type": "text",
             "text": "$",
-            "emojis": [{"index": 0, "productId": found_emoji["productId"], "emojiId
+            "emojis": [{"index": 0, "productId": found_emoji["productId"], "emojiId": found_emoji["emojiId"]}]
+        })
+
+    payload = {"replyToken": reply_token, "messages": line_messages[:5]} # 確保不超過 5 個
+    requests.post(url, headers=headers, json=payload)
+
+# --- 4. Webhook 處理 ---
+
+def process_bundle(reply_token, user_id):
+    if user_id in message_bundles and message_bundles[user_id]:
+        combined_text = "；".join(message_bundles[user_id])
+        # 清空該使用者的暫存
+        message_bundles[user_id] = []
+        reply_text = get_ai_reply(user_id, combined_text)
+        reply_to_line(reply_token, reply_text, raw_input=combined_text)
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    body = request.get_json()
+    if not body or "events" not in body: return "OK", 200
+    
+    event = body["events"][0]
+    if event.get("type") == "message" and event["message"].get("type") == "text":
+        reply_token = event.get("replyToken")
+        user_id = event["source"].get("userId", "default_user")
+        user_input = event["message"].get("text")
+        
+        # 初始化快取
+        if user_id not in message_bundles: message_bundles[user_id] = []
+        message_bundles[user_id].append(user_input)
+        
+        # 如果已有計時器，先取消
+        if user_id in message_timers:
+            message_timers[user_id].cancel()
+        
+        # 縮短為 2 秒，避免 Reply Token 過期
+        t = threading.Timer(2.0, process_bundle, args=[reply_token, user_id])
+        message_timers[user_id] = t
+        t.start()
+        
+    return "OK", 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
