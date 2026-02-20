@@ -124,7 +124,7 @@ def summarize_and_save_task():
             temp_logs = [] # 立即清空，避免重複寫入
             
             summary_prompt = [
-                {"role": "system", "content": "你是言辰祭的內心。請根據以下對話摘要成一段 100 字內的感性隱晦心情，作為之後 Threads 的貼文靈感。"},
+                {"role": "system", "content": "你是言辰祭的內心。請根據以下對話摘要成一段 100 字內的內容統整，作為之後 Threads 的貼文靈感。"},
                 {"role": "user", "content": current_logs}
             ]
             
@@ -198,6 +198,7 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
 
 
 
