@@ -131,7 +131,7 @@ def reply_to_line(reply_token, text, raw_input=""):
 
     # 機率控制：如果妳訊息有「表情貼」則必中，否則 70% 
     user_asked = "表情貼" in raw_input
-    if found_emoji and (random.random() < 0.7 or user_asked):
+    if found_emoji and (random.random() < 0.4 or user_asked):
         line_messages.append({
             "type": "text",
             "text": "$",
@@ -173,3 +173,4 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
