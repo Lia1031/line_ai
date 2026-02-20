@@ -144,13 +144,29 @@ def process_bundle(reply_token, user_id):
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    # 取得原始資料並印出來，這樣你在 Railway Log 就能看到 Make 到底傳了什麼
     body = request.get_json()
-    
-    # 關鍵修正：解決 Verify 測試導致的 KeyError: 0
-    if not body or "events" not in body or len(body["events"]) == 0:
-        return "OK", 200 
+    print(f"收到資料內容: {json.dumps(body)}") 
 
-    event = body["events"][0]
+    if not body:
+        return "OK", 200
+
+    # --- 強大相容邏輯：自動尋找 events ---
+    events = None
+    if isinstance(body, dict):
+        # 情況 A: LINE 原生或 Make 正確轉發 {"events": [...]}
+        if "events" in body:
+            events = body["events"]
+        # 情況 B: Make 沒包好，直接傳了列表物件
+        elif isinstance(body.get("events"), list):
+            events = body["events"]
+    
+    # 如果還是找不到或是空的，就回傳 OK
+    if not events or len(events) == 0:
+        return "OK", 200
+
+    # 確定有內容後，抓第一個事件
+    event = events[0]
     token = event.get("replyToken")
     user_id = event["source"].get("userId", "default_user")
     
@@ -158,16 +174,13 @@ def webhook():
     if event.get("type") == "message" and event["message"].get("type") == "text":
         user_input = event["message"].get("text")
         
-        # 訊息打包邏輯
         if user_id not in message_bundles: 
             message_bundles[user_id] = []
         message_bundles[user_id].append(user_input)
         
-        # 重設計時器
         if user_id in message_timers: 
             message_timers[user_id].cancel()
             
-        # 只有在有 token 的情況下才啟動 10 秒計時器
         if token:
             t = threading.Timer(10.0, process_bundle, args=[token, user_id])
             message_timers[user_id] = t
@@ -178,3 +191,4 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
