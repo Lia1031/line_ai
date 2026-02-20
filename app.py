@@ -57,23 +57,19 @@ def save_chat_context(context):
 message_bundles = {}
 message_timers = {}
 
-# --- 2. 核心邏輯 (強化清理功能) ---
+# --- 2. 核心邏輯 ---
 
 def get_ai_reply(user_id, content):
     all_contexts = load_chat_context()
     tw_tz = pytz.timezone('Asia/Taipei')
-    # 瘦身：時間格式縮短，減少 Token 消耗
     time_str = datetime.now(tw_tz).strftime("%m/%d %H:%M")
     
     if user_id not in all_contexts:
         all_contexts[user_id] = [{"role": "system", "content": load_system_prompt()}]
     
     all_contexts[user_id][0] = {"role": "system", "content": load_system_prompt()}
-    
-    # 傳給 AI 的內容，明確標示這是系統注入的時間資訊
     all_contexts[user_id].append({"role": "user", "content": f"[Time: {time_str}]\n{content}"})
     
-    # 限制記憶：保留 System + 最近 6 則
     history = [all_contexts[user_id][0]] + all_contexts[user_id][-6:]
 
     try:
@@ -85,18 +81,14 @@ def get_ai_reply(user_id, content):
         )
         full_reply = response.choices[0].message.content
         
-        # --- 核心清理：刪除 AI 可能誤學的時間戳記與標籤 ---
-        # 1. 刪除表情標籤 [表情_xxx]
-        # 2. 刪除可能出現的時間格式如 (2026-02-20 ...) 或 [Time: ...] 或 02/20 14:00
         clean_reply = re.sub(r'\[表情_[^\]]+\]', '', full_reply)
-        clean_reply = re.sub(r'[\(\[][0-9\/\-\s:]+[\)\]]', '', clean_reply) # 刪除括號內的時間
+        clean_reply = re.sub(r'[\(\[][0-9\/\-\s:]+[\)\]]', '', clean_reply)
         clean_reply = clean_reply.strip()
 
-        # 存入記憶的是最乾淨的文字，能大幅省下下次對話的 Token
         all_contexts[user_id].append({"role": "assistant", "content": clean_reply})
         save_chat_context(all_contexts)
         
-        return full_reply # 這裡回傳 full_reply 是為了讓 reply_to_line 解析標籤
+        return full_reply
     except Exception as e:
         print(f"AI API Error: {e}")
         return "（忙碌中...）"
@@ -110,13 +102,11 @@ def reply_to_line(reply_token, text, raw_input=""):
     emoji_config = load_emojis()
     found_emoji = None
     
-    # 優先解析標籤
     for tag, config in emoji_config.items():
         if tag in text:
             found_emoji = config
             break
     
-    # 徹底清理要顯示給妳看的文字（不顯示標籤、不顯示殘留時間）
     display_text = re.sub(r'\[表情_[^\]]+\]', '', text)
     display_text = re.sub(r'[\(\[][0-9\/\-\s:]+[\)\]]', '', display_text)
     display_text = display_text.strip()
@@ -129,7 +119,6 @@ def reply_to_line(reply_token, text, raw_input=""):
     else:
         line_messages = [{"type": "text", "text": s} for s in segments]
 
-    # 機率控制：如果妳訊息有「表情貼」則必中，否則 70% 
     user_asked = "表情貼" in raw_input
     if found_emoji and (random.random() < 0.2 or user_asked):
         line_messages.append({
@@ -144,7 +133,7 @@ def reply_to_line(reply_token, text, raw_input=""):
     payload = {"replyToken": reply_token, "messages": line_messages}
     requests.post(url, headers=headers, json=payload)
 
-# --- 4. Webhook 處理 ---
+# --- 4. Webhook 處理 (已修正 Verify 與 KeyError 問題) ---
 
 def process_bundle(reply_token, user_id):
     if user_id in message_bundles:
@@ -156,22 +145,36 @@ def process_bundle(reply_token, user_id):
 @app.route("/webhook", methods=["POST"])
 def webhook():
     body = request.get_json()
-    if not body or "events" not in body: return "OK", 200
+    
+    # 關鍵修正：解決 Verify 測試導致的 KeyError: 0
+    if not body or "events" not in body or len(body["events"]) == 0:
+        return "OK", 200 
+
     event = body["events"][0]
     token = event.get("replyToken")
     user_id = event["source"].get("userId", "default_user")
     
+    # 處理文字訊息
     if event.get("type") == "message" and event["message"].get("type") == "text":
         user_input = event["message"].get("text")
-        if user_id not in message_bundles: message_bundles[user_id] = []
+        
+        # 訊息打包邏輯
+        if user_id not in message_bundles: 
+            message_bundles[user_id] = []
         message_bundles[user_id].append(user_input)
-        if user_id in message_timers: message_timers[user_id].cancel()
-        t = threading.Timer(10.0, process_bundle, args=[token, user_id])
-        message_timers[user_id] = t
-        t.start()
+        
+        # 重設計時器
+        if user_id in message_timers: 
+            message_timers[user_id].cancel()
+            
+        # 只有在有 token 的情況下才啟動 10 秒計時器
+        if token:
+            t = threading.Timer(10.0, process_bundle, args=[token, user_id])
+            message_timers[user_id] = t
+            t.start()
+            
     return "OK", 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
-
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
