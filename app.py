@@ -144,33 +144,31 @@ def process_bundle(reply_token, user_id):
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # 取得原始資料並印出來，這樣你在 Railway Log 就能看到 Make 到底傳了什麼
     body = request.get_json()
     print(f"收到資料內容: {json.dumps(body)}") 
 
     if not body:
         return "OK", 200
 
-    # --- 強大相容邏輯：自動尋找 events ---
-    events = None
-    if isinstance(body, dict):
-        # 情況 A: LINE 原生或 Make 正確轉發 {"events": [...]}
-        if "events" in body:
-            events = body["events"]
-        # 情況 B: Make 沒包好，直接傳了列表物件
-        elif isinstance(body.get("events"), list):
-            events = body["events"]
+    # --- 關鍵修復：處理 Make.com 把列表變成物件的問題 ---
+    events = body.get("events")
     
-    # 如果還是找不到或是空的，就回傳 OK
-    if not events or len(events) == 0:
+    if not events:
         return "OK", 200
 
-    # 確定有內容後，抓第一個事件
+    # 如果 events 是一個字典（Make.com 的行為），我們把它包成列表
+    if isinstance(events, dict):
+        events = [events]
+    
+    # 如果 events 是空的列表，直接回傳
+    if not isinstance(events, list) or len(events) == 0:
+        return "OK", 200
+
+    # 現在保證 events 是列表且有東西了
     event = events[0]
     token = event.get("replyToken")
     user_id = event["source"].get("userId", "default_user")
     
-    # 處理文字訊息
     if event.get("type") == "message" and event["message"].get("type") == "text":
         user_input = event["message"].get("text")
         
@@ -191,4 +189,5 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
