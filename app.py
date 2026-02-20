@@ -25,19 +25,22 @@ TEXT_MODEL = "gemini-2.0-flash-exp"
 client = OpenAI(api_key=V1API_KEY, base_url=V1API_BASE_URL)
 
 # --- 1. Google Sheets 權限設定 ---
-# 修改 app.py 中的第 33-40 行左右
+# --- 1. Google Sheets 權限設定 (修改版) ---
 def get_sheet():
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         
-        # 讀取檔案內容
-        with open("creds.json", "r") as f:
-            creds_info = json.load(f)
-            
-        # 關鍵修正：確保私鑰中的換行符號被正確解析
-        creds_info['private_key'] = creds_info['private_key'].replace('\\n', '\n')
+        # 優先從環境變數讀取 JSON 內容
+        creds_json = os.getenv("GOOGLE_CREDS")
         
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+        if creds_json:
+            # 解析環境變數中的 JSON 字串
+            info = json.loads(creds_json)
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(info, scope)
+        else:
+            # 如果變數不存在，才找實體檔案 (備用)
+            creds = ServiceAccountCredentials.from_json_keyfile_name("creds.json", scope)
+            
         gc = gspread.authorize(creds)
         return gc.open(SHEET_NAME).sheet1
     except Exception as e:
@@ -195,4 +198,5 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
 
