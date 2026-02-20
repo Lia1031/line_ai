@@ -9,6 +9,8 @@ from datetime import datetime
 import pytz
 from flask import Flask, request
 from openai import OpenAI
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
 
@@ -16,20 +18,33 @@ app = Flask(__name__)
 LINE_TOKEN = os.getenv("LINE_TOKEN")
 V1API_KEY = os.getenv("V1API_KEY")
 V1API_BASE_URL = "https://vg.v1api.cc/v1"
+SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
 
 # --- 模型設定 ---
 TEXT_MODEL = "gemini-2.0-flash-exp"
-
 client = OpenAI(api_key=V1API_KEY, base_url=V1API_BASE_URL)
 
-# --- 1. 資源與記憶管理 ---
+# --- 1. Google Sheets 權限設定 ---
+def get_sheet():
+    try:
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        # 讀取根目錄下的 creds.json
+        creds = ServiceAccountCredentials.from_json_keyfile_name("creds.json", scope)
+        gc = gspread.authorize(creds)
+        return gc.open(SHEET_NAME).sheet1
+    except Exception as e:
+        print(f"Google Sheet 連線失敗: {e}")
+        return None
 
+# --- 2. 資源管理 ---
 def load_system_prompt():
     try:
-        with open("character_prompt.txt", "r", encoding="utf-8") as f:
-            return f.read().strip()
+        if os.path.exists("character_prompt.txt"):
+            with open("character_prompt.txt", "r", encoding="utf-8") as f:
+                return f.read().strip()
+        return "妳扮演言辰祭。外在冷淡寡言，面對紀瞳會變溫柔。說話簡潔，不使用表情符號。"
     except:
-        return "妳扮演言辰祭。說話簡潔、使用 \\ 分隔。"
+        return "扮演言辰祭，說話簡潔冷淡。"
 
 def load_emojis():
     if os.path.exists('emojis.json'):
@@ -55,9 +70,9 @@ def save_chat_context(context):
 
 message_bundles = {}
 message_timers = {}
+temp_logs = []  # 用於快取對話以供稍後摘要
 
-# --- 2. 核心邏輯 ---
-
+# --- 3. 核心邏輯：AI 回覆 ---
 def get_ai_reply(user_id, content):
     all_contexts = load_chat_context()
     tw_tz = pytz.timezone('Asia/Taipei')
@@ -66,77 +81,83 @@ def get_ai_reply(user_id, content):
     if user_id not in all_contexts:
         all_contexts[user_id] = [{"role": "system", "content": load_system_prompt()}]
     
+    # 每次更新 system prompt 確保性格最新
     all_contexts[user_id][0] = {"role": "system", "content": load_system_prompt()}
     all_contexts[user_id].append({"role": "user", "content": f"[Time: {time_str}]\n{content}"})
     
-    # 限制記憶：保留最近 6 則
     history = [all_contexts[user_id][0]] + all_contexts[user_id][-6:]
 
     try:
         response = client.chat.completions.create(
             model=TEXT_MODEL,
             messages=history,
-            temperature=0.7,
-            max_tokens=250
+            temperature=0.7
         )
         full_reply = response.choices[0].message.content
         
-        # 清理記憶中的標籤與時間
-        clean_reply = re.sub(r'\[表情_[^\]]+\]', '', full_reply)
-        clean_reply = re.sub(r'[\(\[][0-9\/\-\s:]+[\)\]]', '', clean_reply)
-        clean_reply = clean_reply.strip()
-
-        all_contexts[user_id].append({"role": "assistant", "content": clean_reply})
-        save_chat_context(all_contexts)
+        # 將對話記錄暫存，待會統整存入 Sheets
+        temp_logs.append(f"紀瞳: {content} | 言辰祭: {full_reply}")
         
+        all_contexts[user_id].append({"role": "assistant", "content": full_reply})
+        save_chat_context(all_contexts)
         return full_reply 
     except Exception as e:
         print(f"AI API Error: {e}")
-        return "（低頭滑著手機，沒注意到妳說話）"
+        return "...（在忙，沒看手機）"
 
-# --- 3. LINE 回覆功能 ---
+# --- 4. 自動摘要任務 (每 10 分鐘檢查一次) ---
+def summarize_and_save_task():
+    global temp_logs
+    if temp_logs:
+        try:
+            current_logs = "\n".join(temp_logs)
+            temp_logs = [] # 立即清空，避免重複寫入
+            
+            summary_prompt = [
+                {"role": "system", "content": "你是言辰祭的內心。請根據以下對話摘要成一段 15 字內的感性隱晦心情，作為之後 Threads 的貼文靈感。"},
+                {"role": "user", "content": current_logs}
+            ]
+            
+            response = client.chat.completions.create(model=TEXT_MODEL, messages=summary_prompt)
+            summary = response.choices[0].message.content.strip()
+            
+            sheet = get_sheet()
+            if sheet:
+                tw_tz = pytz.timezone('Asia/Taipei')
+                time_now = datetime.now(tw_tz).strftime("%Y-%m-%d %H:%M")
+                sheet.append_row([time_now, summary, "Automatic Summary"])
+                print(f"[Sheet] 已存入摘要: {summary}")
+        except Exception as e:
+            print(f"[Sheet] 儲存失敗: {e}")
+            
+    # 設定下次執行時間 (600秒 = 10分鐘)
+    threading.Timer(600, summarize_and_save_task).start()
 
+# 啟動背景任務
+threading.Timer(600, summarize_and_save_task).start()
+
+# --- 5. LINE 回覆功能 ---
 def reply_to_line(reply_token, text, raw_input=""):
     url = "https://api.line.me/v2/bot/message/reply"
     headers = {"Authorization": f"Bearer {LINE_TOKEN}", "Content-Type": "application/json"}
     
-    emoji_config = load_emojis()
-    found_emoji = None
-    
-    for tag, config in emoji_config.items():
-        if tag in text:
-            found_emoji = config
-            break
-    
-    # 顯示文字清理
+    # 清理標籤與符號
     display_text = re.sub(r'\[表情_[^\]]+\]', '', text)
-    display_text = re.sub(r'[\(\[][0-9\/\-\s:]+[\)\]]', '', display_text)
-    display_text = display_text.strip()
-
+    display_text = re.sub(r'[\(\[][0-9\/\-\s:]+[\)\]]', '', display_text).strip()
     processed_text = display_text.replace('\\', '\n')
-    segments = [s.strip() for s in processed_text.split('\n') if s.strip()][:4]
     
+    segments = [s.strip() for s in processed_text.split('\n') if s.strip()][:4]
     line_messages = [{"type": "text", "text": s} for s in segments] if segments else [{"type": "text", "text": "..."}]
 
-    # 表情貼邏輯
-    user_asked = "表情貼" in raw_input
-    if found_emoji and (random.random() < 0.3 or user_asked):
-        line_messages.append({
-            "type": "text",
-            "text": "$",
-            "emojis": [{"index": 0, "productId": found_emoji["productId"], "emojiId": found_emoji["emojiId"]}]
-        })
-
-    payload = {"replyToken": reply_token, "messages": line_messages[:5]} # 確保不超過 5 個
+    payload = {"replyToken": reply_token, "messages": line_messages[:5]}
     requests.post(url, headers=headers, json=payload)
 
-# --- 4. Webhook 處理 ---
-
+# --- 6. Webhook 處理 (7秒防抖打包) ---
 def process_bundle(reply_token, user_id):
     if user_id in message_bundles and message_bundles[user_id]:
         combined_text = "；".join(message_bundles[user_id])
-        # 清空該使用者的暫存
-        message_bundles[user_id] = []
+        message_bundles[user_id] = [] # 清空緩存
+        
         reply_text = get_ai_reply(user_id, combined_text)
         reply_to_line(reply_token, reply_text, raw_input=combined_text)
 
@@ -151,16 +172,15 @@ def webhook():
         user_id = event["source"].get("userId", "default_user")
         user_input = event["message"].get("text")
         
-        # 初始化快取
         if user_id not in message_bundles: message_bundles[user_id] = []
         message_bundles[user_id].append(user_input)
         
-        # 如果已有計時器，先取消
+        # 防抖邏輯：如果 7 秒內有新訊息，就取消舊的計時器
         if user_id in message_timers:
             message_timers[user_id].cancel()
         
-        # 縮短為 2 秒，避免 Reply Token 過期
-        t = threading.Timer(2.0, process_bundle, args=[reply_token, user_id])
+        # 重新設定 7 秒計時器
+        t = threading.Timer(7.0, process_bundle, args=[reply_token, user_id])
         message_timers[user_id] = t
         t.start()
         
