@@ -161,16 +161,27 @@ def summarize_and_save_task():
         try:
             current_logs = "\n".join(temp_logs)
             temp_logs = []
-            summary_prompt = [{"role": "system", "content": "摘要對話。"}, {"role": "user", "content": current_logs}]
+            
+            # --- 修改重點 1: 強化 Prompt 指令，強制要求單行且感性 ---
+            summary_prompt = [
+                {"role": "system", "content": "你現在是言辰祭的內心獨白。請將對話摘要成一段極簡、冷淡且感性的 Threads 貼文草稿。"},
+                {"role": "user", "content": f"根據以下對話寫出一句 20 字內的獨白。規範：輸出必須為『單行文字』，絕對禁止換行，禁止使用表情符號：\n\n{current_logs}"}
+            ]
+            
             response = client.chat.completions.create(model=TEXT_MODEL, messages=summary_prompt)
-            summary = response.choices[0].message.content.strip()
+            # --- 修改重點 2: 在程式端強制過濾掉任何潛在的換行符號 ---
+            summary = response.choices[0].message.content.strip().replace('\n', ' ').replace('\r', '')
+            
             sheet = get_sheet()
             if sheet:
                 tw_tz = pytz.timezone('Asia/Taipei')
                 time_now = datetime.now(tw_tz).strftime("%Y-%m-%d %H:%M")
                 sheet.append_row([time_now, summary, "Automatic Summary"])
+                print(f"[Sheet] 成功存入摘要: {summary}")
         except Exception as e:
             print(f"[Sheet] 失敗: {e}")
+    
+    # 這裡可以根據你想發文的頻率調整 (1800秒 = 30分鐘)
     threading.Timer(1800, summarize_and_save_task).start()
 
 threading.Timer(10800, auto_interact_task).start()
@@ -234,3 +245,4 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
