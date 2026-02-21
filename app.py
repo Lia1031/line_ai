@@ -246,11 +246,12 @@ def webhook():
 
 # --- 啟動邏輯 ---
 if __name__ == "__main__":
-    # 延遲任務啟動，優先讓 Flask 網頁伺服器回應 Railway 的健康檢查
-    threading.Timer(15, auto_interact_task).start()
-    threading.Timer(30, summarize_and_save_task).start()
+    # 將延遲調得更高，給 Railway 足夠的時間完成健康檢查
+    threading.Timer(60, auto_interact_task).start()      # 60秒後再跑
+    threading.Timer(90, summarize_and_save_task).start() # 90秒後再跑
     
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
 
