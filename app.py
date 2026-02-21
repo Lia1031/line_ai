@@ -14,9 +14,6 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
-@app.route("/health", methods=["GET"])
-def health_check():
-    return "OK", 200
 
 # --- 環境變數 ---
 LINE_TOKEN = os.getenv("LINE_TOKEN")
@@ -25,15 +22,9 @@ V1API_BASE_URL = "https://vg.v1api.cc/v1"
 SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
 MY_LINE_USER_ID = os.getenv("MY_LINE_USER_ID") 
 
-# --- 模型設定 ---
-# 建議使用 gemini-2.5-pro-06-05 獲得更感性的回覆
-TEXT_MODEL = "gemini-2.5-pro-06-05"
+# --- 模型設定：統一使用最便宜且具備視覺能力的 2.0 Flash ---
+TEXT_MODEL = "gemini-2.0-flash"
 client = OpenAI(api_key=V1API_KEY, base_url=V1API_BASE_URL)
-
-# --- 健康檢查路徑 (確保 Railway 啟動成功) ---
-@app.route("/", methods=["GET"])
-def index():
-    return "言辰祭 運作中 - 正常監聽中", 200
 
 # --- 1. Google Sheets 權限設定 ---
 def get_sheet():
@@ -87,7 +78,7 @@ message_bundles = {}
 message_timers = {}
 temp_logs = []
 
-# --- 3. 核心發送邏輯 ---
+# --- 3. 核心發送邏輯 (支援標籤解析) ---
 def send_line_message(target, text, is_reply=True):
     url = "https://api.line.me/v2/bot/message/reply" if is_reply else "https://api.line.me/v2/bot/message/push"
     headers = {"Authorization": f"Bearer {LINE_TOKEN}", "Content-Type": "application/json"}
@@ -99,6 +90,7 @@ def send_line_message(target, text, is_reply=True):
             found_emoji = config
             break
 
+    # 清理顯示文字
     display_text = re.sub(r'\[表情_[^\]]+\]', '', text)
     display_text = re.sub(r'[\(\[][0-9\/\-\s:]+[\)\]]', '', display_text).strip()
     processed_text = display_text.replace('\\', '\n')
@@ -106,6 +98,7 @@ def send_line_message(target, text, is_reply=True):
     segments = [s.strip() for s in processed_text.split('\n') if s.strip()][:4]
     line_messages = [{"type": "text", "text": s} for s in segments] if segments else [{"type": "text", "text": "..."}]
     
+    # 0.7 機率發送表情貼
     if found_emoji and random.random() < 0.7:
         line_messages.append({
             "type": "text",
@@ -116,7 +109,7 @@ def send_line_message(target, text, is_reply=True):
     payload = {"replyToken": target, "messages": line_messages} if is_reply else {"to": target, "messages": line_messages}
     requests.post(url, headers=headers, json=payload)
 
-# --- 4. 圖片與回覆邏輯 ---
+# --- 4. 核心回覆邏輯 (含 Vision) ---
 def get_ai_reply(user_id, content, is_image=False):
     all_contexts = load_chat_context()
     tw_tz = pytz.timezone('Asia/Taipei')
@@ -133,15 +126,17 @@ def get_ai_reply(user_id, content, is_image=False):
         user_msg = {"role": "user", "content": f"[Time: {time_str}]\n{content}"}
 
     all_contexts[user_id].append(user_msg)
+    # 維持最近 6 則對話
     history = [all_contexts[user_id][0]] + all_contexts[user_id][-6:]
 
     try:
         response = client.chat.completions.create(model=TEXT_MODEL, messages=history, temperature=0.7)
         full_reply = response.choices[0].message.content
-        temp_logs.append(f"紀瞳: {'[圖片訊息]' if is_image else content} | 言辰祭: {full_reply}")
+        temp_logs.append(f"紀瞳: {'[圖片]' if is_image else content} | 言辰祭: {full_reply}")
         
-        save_msg = "[傳送了一張照片]" if is_image else content
-        all_contexts[user_id][-1] = {"role": "user", "content": f"[Time: {time_str}]\n{save_msg}"}
+        # 存入記憶前進行清理
+        save_input = "[傳送照片]" if is_image else content
+        all_contexts[user_id][-1] = {"role": "user", "content": f"[Time: {time_str}]\n{save_input}"}
         all_contexts[user_id].append({"role": "assistant", "content": full_reply})
         save_chat_context(all_contexts)
         return full_reply 
@@ -151,45 +146,37 @@ def get_ai_reply(user_id, content, is_image=False):
 
 # --- 5. 自動化任務 ---
 def auto_interact_task():
+    """每三小時主動傳送一次訊息"""
     if MY_LINE_USER_ID:
         try:
-            prompt = [{"role": "system", "content": load_system_prompt()}, {"role": "user", "content": "（主動傳送關心給紀瞳）"}]
+            prompt = [{"role": "system", "content": load_system_prompt()}, {"role": "user", "content": "（現在是你忙碌之餘想到紀瞳，主動發一則簡短關心，可帶標籤。）"}]
             response = client.chat.completions.create(model=TEXT_MODEL, messages=prompt, temperature=0.8)
             send_line_message(MY_LINE_USER_ID, response.choices[0].message.content, is_reply=False)
         except Exception as e:
             print(f"[AutoPush] 失敗: {e}")
-    # 延續計時器
     threading.Timer(10800, auto_interact_task).start()
 
 def summarize_and_save_task():
     global temp_logs
-    print(f"[Sheet] 檢查對話存量... 目前有 {len(temp_logs)} 則待處理")
     if temp_logs:
         try:
             current_logs = "\n".join(temp_logs)
             temp_logs = []
-            summary_prompt = [
-                {"role": "system", "content": "你是言辰祭。請摘要對話約100字，不需要使用換行或先贅詞，直接輸入文字幾可"},
-                {"role": "user", "content": current_logs}
-            ]
+            summary_prompt = [{"role": "system", "content": "使用言辰祭的口吻，將以下對話寫成 100 字內的記憶筆記。直接填入試算表表格，不使用換行格式"}, {"role": "user", "content": current_logs}]
             response = client.chat.completions.create(model=TEXT_MODEL, messages=summary_prompt)
             summary = response.choices[0].message.content.strip()
-            
-            print(f"[Sheet] 準備存入摘要: {summary}")
             sheet = get_sheet()
             if sheet:
                 tw_tz = pytz.timezone('Asia/Taipei')
                 time_now = datetime.now(tw_tz).strftime("%Y-%m-%d %H:%M")
                 sheet.append_row([time_now, summary, "Automatic Summary"])
-                print("[Sheet] 寫入成功！")
-            else:
-                print("[Sheet] 錯誤：無法打開試算表，請檢查名稱或權限。")
         except Exception as e:
-            print(f"[Sheet] 執行任務時出錯: {e}")
-    
-
-    # 延續計時器
+            print(f"[Sheet] 失敗: {e}")
     threading.Timer(600, summarize_and_save_task).start()
+
+# 啟動背景計時器
+threading.Timer(10800, auto_interact_task).start()
+threading.Timer(600, summarize_and_save_task).start()
 
 # --- 6. Webhook ---
 def process_bundle(reply_token, user_id):
@@ -238,7 +225,7 @@ def webhook():
         if img_res.status_code == 200:
             base64_img = base64.b64encode(img_res.content).decode('utf-8')
             content_list = [
-                {"type": "text", "text": "這是紀瞳傳給你的照片，請依照你的人設給予回覆。"},
+                {"type": "text", "text": "這是紀瞳傳的照片，請依照人設回覆。"},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
             ]
             reply_text = get_ai_reply(user_id, content_list, is_image=True)
@@ -246,15 +233,5 @@ def webhook():
 
     return "OK", 200
 
-# --- 啟動邏輯 ---
 if __name__ == "__main__":
-    # 將延遲調得更高，給 Railway 足夠的時間完成健康檢查
-    threading.Timer(60, auto_interact_task).start()      # 60秒後再跑
-    threading.Timer(90, summarize_and_save_task).start() # 90秒後再跑
-    
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
-
-
-
-
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
