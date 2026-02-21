@@ -23,8 +23,8 @@ SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
 MY_LINE_USER_ID = os.getenv("MY_LINE_USER_ID") 
 
 # --- 模型設定 ---
-# 建議使用 gemini-2.0-pro-exp 獲得更感性的回覆
-TEXT_MODEL = "gemini-2.0-pro-exp"
+# 建議使用 gemini-2.5-pro-06-05 獲得更感性的回覆
+TEXT_MODEL = "gemini-2.5-pro-06-05"
 client = OpenAI(api_key=V1API_KEY, base_url=V1API_BASE_URL)
 
 # --- 健康檢查路徑 (確保 Railway 啟動成功) ---
@@ -249,3 +249,4 @@ if __name__ == "__main__":
     
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
