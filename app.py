@@ -163,31 +163,33 @@ def auto_interact_task():
 
 def summarize_and_save_task():
     global temp_logs
+    print(f"[Sheet] 檢查對話存量... 目前有 {len(temp_logs)} 則待處理")
     if temp_logs:
         try:
             current_logs = "\n".join(temp_logs)
             temp_logs = []
-            
-            # 強化 Prompt 指令，強制要求單行且感性
             summary_prompt = [
-                {"role": "system", "content": "你現在是言辰祭的內心獨白。請將對話摘要成一段極簡、冷淡且感性的 Threads 貼文草稿。"},
-                {"role": "user", "content": f"根據以下對話寫出一句 20 字內的獨白。規範：輸出必須為『單行文字』，絕對禁止換行，禁止使用表情符號：\n\n{current_logs}"}
+                {"role": "system", "content": "你是言辰祭。請摘要對話約100字，不需要使用換行或先贅詞，直接輸入文字幾可"},
+                {"role": "user", "content": current_logs}
             ]
-            
             response = client.chat.completions.create(model=TEXT_MODEL, messages=summary_prompt)
-            # 強制清理掉任何換行符號與特殊控制字元
-            summary = response.choices[0].message.content.strip().replace('\n', ' ').replace('\r', '')
+            summary = response.choices[0].message.content.strip()
             
+            print(f"[Sheet] 準備存入摘要: {summary}")
             sheet = get_sheet()
             if sheet:
                 tw_tz = pytz.timezone('Asia/Taipei')
                 time_now = datetime.now(tw_tz).strftime("%Y-%m-%d %H:%M")
                 sheet.append_row([time_now, summary, "Automatic Summary"])
-                print(f"[Sheet] 成功存入摘要: {summary}")
+                print("[Sheet] 寫入成功！")
+            else:
+                print("[Sheet] 錯誤：無法打開試算表，請檢查名稱或權限。")
         except Exception as e:
-            print(f"[Sheet] 失敗: {e}")
+            print(f"[Sheet] 執行任務時出錯: {e}")
+    
+
     # 延續計時器
-    threading.Timer(1800, summarize_and_save_task).start()
+    threading.Timer(600, summarize_and_save_task).start()
 
 # --- 6. Webhook ---
 def process_bundle(reply_token, user_id):
@@ -252,6 +254,7 @@ if __name__ == "__main__":
     
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
