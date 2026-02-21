@@ -23,9 +23,14 @@ SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
 MY_LINE_USER_ID = os.getenv("MY_LINE_USER_ID") 
 
 # --- 模型設定 ---
-# 使用具備多模態能力的 2.5 Pro
-TEXT_MODEL = "gemini-2.5-pro-06-05"
+# 建議使用 gemini-2.0-pro-exp 獲得更感性的回覆
+TEXT_MODEL = "gemini-2.0-pro-exp"
 client = OpenAI(api_key=V1API_KEY, base_url=V1API_BASE_URL)
+
+# --- 健康檢查路徑 (確保 Railway 啟動成功) ---
+@app.route("/", methods=["GET"])
+def index():
+    return "言辰祭 運作中 - 正常監聽中", 200
 
 # --- 1. Google Sheets 權限設定 ---
 def get_sheet():
@@ -79,7 +84,7 @@ message_bundles = {}
 message_timers = {}
 temp_logs = []
 
-# --- 3. 核心發送邏輯 (支援表情貼) ---
+# --- 3. 核心發送邏輯 ---
 def send_line_message(target, text, is_reply=True):
     url = "https://api.line.me/v2/bot/message/reply" if is_reply else "https://api.line.me/v2/bot/message/push"
     headers = {"Authorization": f"Bearer {LINE_TOKEN}", "Content-Type": "application/json"}
@@ -108,7 +113,7 @@ def send_line_message(target, text, is_reply=True):
     payload = {"replyToken": target, "messages": line_messages} if is_reply else {"to": target, "messages": line_messages}
     requests.post(url, headers=headers, json=payload)
 
-# --- 4. 圖片與回覆邏輯 (含 Vision) ---
+# --- 4. 圖片與回覆邏輯 ---
 def get_ai_reply(user_id, content, is_image=False):
     all_contexts = load_chat_context()
     tw_tz = pytz.timezone('Asia/Taipei')
@@ -119,9 +124,7 @@ def get_ai_reply(user_id, content, is_image=False):
     
     all_contexts[user_id][0] = {"role": "system", "content": load_system_prompt()}
     
-    # 建立訊息內容
     if is_image:
-        # 圖片模式下的 content 為包含 base64 的 list
         user_msg = {"role": "user", "content": content}
     else:
         user_msg = {"role": "user", "content": f"[Time: {time_str}]\n{content}"}
@@ -134,7 +137,6 @@ def get_ai_reply(user_id, content, is_image=False):
         full_reply = response.choices[0].message.content
         temp_logs.append(f"紀瞳: {'[圖片訊息]' if is_image else content} | 言辰祭: {full_reply}")
         
-        # 存入記憶前清理 (Vision 的內容不建議存太大，這裡存簡短描述即可)
         save_msg = "[傳送了一張照片]" if is_image else content
         all_contexts[user_id][-1] = {"role": "user", "content": f"[Time: {time_str}]\n{save_msg}"}
         all_contexts[user_id].append({"role": "assistant", "content": full_reply})
@@ -153,6 +155,7 @@ def auto_interact_task():
             send_line_message(MY_LINE_USER_ID, response.choices[0].message.content, is_reply=False)
         except Exception as e:
             print(f"[AutoPush] 失敗: {e}")
+    # 延續計時器
     threading.Timer(10800, auto_interact_task).start()
 
 def summarize_and_save_task():
@@ -162,14 +165,14 @@ def summarize_and_save_task():
             current_logs = "\n".join(temp_logs)
             temp_logs = []
             
-            # --- 修改重點 1: 強化 Prompt 指令，強制要求單行且感性 ---
+            # 強化 Prompt 指令，強制要求單行且感性
             summary_prompt = [
                 {"role": "system", "content": "你現在是言辰祭的內心獨白。請將對話摘要成一段極簡、冷淡且感性的 Threads 貼文草稿。"},
                 {"role": "user", "content": f"根據以下對話寫出一句 20 字內的獨白。規範：輸出必須為『單行文字』，絕對禁止換行，禁止使用表情符號：\n\n{current_logs}"}
             ]
             
             response = client.chat.completions.create(model=TEXT_MODEL, messages=summary_prompt)
-            # --- 修改重點 2: 在程式端強制過濾掉任何潛在的換行符號 ---
+            # 強制清理掉任何換行符號與特殊控制字元
             summary = response.choices[0].message.content.strip().replace('\n', ' ').replace('\r', '')
             
             sheet = get_sheet()
@@ -180,12 +183,8 @@ def summarize_and_save_task():
                 print(f"[Sheet] 成功存入摘要: {summary}")
         except Exception as e:
             print(f"[Sheet] 失敗: {e}")
-    
-    # 這裡可以根據你想發文的頻率調整 (1800秒 = 30分鐘)
+    # 延續計時器
     threading.Timer(1800, summarize_and_save_task).start()
-
-threading.Timer(10800, auto_interact_task).start()
-threading.Timer(1800, summarize_and_save_task).start()
 
 # --- 6. Webhook ---
 def process_bundle(reply_token, user_id):
@@ -226,7 +225,6 @@ def webhook():
         t.start()
 
     elif msg_type == "image":
-        # 下載圖片並轉 Base64
         msg_id = msg["id"]
         img_url = f"https://api-data.line.me/v2/bot/message/{msg_id}/content"
         headers = {"Authorization": f"Bearer {LINE_TOKEN}"}
@@ -243,6 +241,11 @@ def webhook():
 
     return "OK", 200
 
+# --- 啟動邏輯 ---
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
+    # 延遲任務啟動，優先讓 Flask 網頁伺服器回應 Railway 的健康檢查
+    threading.Timer(15, auto_interact_task).start()
+    threading.Timer(30, summarize_and_save_task).start()
+    
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
