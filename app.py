@@ -14,6 +14,9 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
+@app.route("/health", methods=["GET"])
+def health_check():
+    return "OK", 200
 
 # --- 環境變數 ---
 LINE_TOKEN = os.getenv("LINE_TOKEN")
@@ -249,4 +252,5 @@ if __name__ == "__main__":
     
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
 
