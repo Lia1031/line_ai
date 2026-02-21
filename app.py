@@ -172,11 +172,11 @@ def summarize_and_save_task():
                 sheet.append_row([time_now, summary, "Automatic Summary"])
         except Exception as e:
             print(f"[Sheet] 失敗: {e}")
-    threading.Timer(600, summarize_and_save_task).start()
+    threading.Timer(1800, summarize_and_save_task).start()
 
 # 啟動背景計時器
 threading.Timer(10800, auto_interact_task).start()
-threading.Timer(600, summarize_and_save_task).start()
+threading.Timer(1800, summarize_and_save_task).start()
 
 # --- 6. Webhook ---
 def process_bundle(reply_token, user_id):
@@ -235,4 +235,5 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
 
