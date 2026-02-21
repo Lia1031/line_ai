@@ -23,7 +23,7 @@ SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
 MY_LINE_USER_ID = os.getenv("MY_LINE_USER_ID") 
 
 # --- 模型設定：統一使用最便宜且具備視覺能力的 2.0 Flash ---
-TEXT_MODEL = "gemini-2.0-flash"
+TEXT_MODEL = "gemini-2.5-pro-06-05"
 client = OpenAI(api_key=V1API_KEY, base_url=V1API_BASE_URL)
 
 # --- 1. Google Sheets 權限設定 ---
@@ -235,3 +235,4 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
